@@ -247,3 +247,209 @@ export function createAxisLines(len = 2): { vertices: Float32Array; count: numbe
   add([0, 0, 0], [0, 0, len], [0.35, 0.55, 0.95]);
   return { vertices: new Float32Array(l), count: l.length / VERTEX_STRIDE };
 }
+
+export function createOctahedron(s: number): CpuMesh {
+  const p: [number, number, number][] = [
+    [s, 0, 0],
+    [-s, 0, 0],
+    [0, s, 0],
+    [0, -s, 0],
+    [0, 0, s],
+    [0, 0, -s],
+  ];
+  const faces: [number, number, number][] = [
+    [0, 2, 4],
+    [4, 2, 1],
+    [1, 2, 5],
+    [5, 2, 0],
+    [0, 4, 3],
+    [4, 1, 3],
+    [1, 5, 3],
+    [5, 0, 3],
+  ];
+  const verts: number[] = [];
+  const idx: number[] = [];
+  let base = 0;
+  for (const f of faces) {
+    const a = p[f[0]]!, b = p[f[1]]!, c = p[f[2]]!;
+    const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const n: [number, number, number] = [nx / l, ny / l, nz / l];
+    pushVert(verts, a, n, [0, 0]);
+    pushVert(verts, b, n, [1, 0]);
+    pushVert(verts, c, n, [0.5, 1]);
+    idx.push(base, base + 1, base + 2);
+    base += 3;
+  }
+  return pack(verts, idx);
+}
+
+export function createWedge(s: number, span: number): CpuMesh {
+  const verts: number[] = [];
+  const idx: number[] = [];
+  const quad = (
+    a: [number, number, number],
+    b: [number, number, number],
+    c: [number, number, number],
+    d: [number, number, number],
+  ) => {
+    const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const ln = Math.hypot(nx, ny, nz) || 1;
+    const nn: [number, number, number] = [nx / ln, ny / ln, nz / ln];
+    const base = verts.length / VERTEX_STRIDE;
+    pushVert(verts, a, nn, [0, 0]);
+    pushVert(verts, b, nn, [1, 0]);
+    pushVert(verts, c, nn, [1, 1]);
+    pushVert(verts, d, nn, [0, 1]);
+    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const tri = (
+    a: [number, number, number],
+    b: [number, number, number],
+    c: [number, number, number],
+  ) => {
+    const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const ln = Math.hypot(nx, ny, nz) || 1;
+    const nn: [number, number, number] = [nx / ln, ny / ln, nz / ln];
+    const base = verts.length / VERTEX_STRIDE;
+    pushVert(verts, a, nn, [0, 0]);
+    pushVert(verts, b, nn, [1, 0]);
+    pushVert(verts, c, nn, [0.5, 1]);
+    idx.push(base, base + 1, base + 2);
+  };
+  const hz = span / 2;
+  const n0: [number, number, number] = [-s, 0, -hz];
+  const n1: [number, number, number] = [-s, 0, hz];
+  const u0: [number, number, number] = [s * 0.75, s * 0.7, -hz];
+  const u1: [number, number, number] = [s * 0.75, s * 0.7, hz];
+  const d0: [number, number, number] = [s * 0.75, -s * 0.7, -hz];
+  const d1: [number, number, number] = [s * 0.75, -s * 0.7, hz];
+  quad(n0, u0, u1, n1);
+  quad(n1, d1, d0, n0);
+  quad(u0, d0, d1, u1);
+  tri(n0, d0, u0);
+  tri(n1, u1, d1);
+  return pack(verts, idx);
+}
+
+function nacaYt(x: number, t: number): number {
+  const xt = Math.min(Math.max(x, 0), 1);
+  return (
+    5 *
+    t *
+    (0.2969 * Math.sqrt(xt) -
+      0.126 * xt -
+      0.3516 * xt * xt +
+      0.2843 * xt * xt * xt -
+      0.1036 * xt * xt * xt * xt)
+  );
+}
+
+function nacaYc(x: number, m: number, p = 0.4): number {
+  if (m < 1e-6) return 0;
+  const xt = Math.min(Math.max(x, 0), 1);
+  if (xt < p) return (m * (2 * p * xt - xt * xt)) / (p * p);
+  return (m * (1 - 2 * p + 2 * p * xt - xt * xt)) / ((1 - p) * (1 - p));
+}
+
+/** Finite NACA wing. Quarter-chord at the origin, span along Z. */
+export function createNacaWing(
+  chord: number,
+  span: number,
+  thick = 0.12,
+  camber = 0.02,
+  cSegs = 28,
+  sSegs = 12,
+): CpuMesh {
+  const verts: number[] = [];
+  const idx: number[] = [];
+  const rows: { p: [number, number, number]; uv: [number, number] }[][] = [];
+  for (let j = 0; j <= sSegs; j++) {
+    const v = j / sSegs;
+    const z = (v - 0.5) * span;
+    const row: { p: [number, number, number]; uv: [number, number] }[] = [];
+    for (let i = 0; i <= cSegs; i++) {
+      const u = i / cSegs;
+      const yt = nacaYt(u, thick) * chord;
+      const yc = nacaYc(u, camber) * chord;
+      const x = (u - 0.25) * chord;
+      row.push({ p: [x, yc + yt, z], uv: [u, v] });
+    }
+    for (let i = cSegs; i >= 0; i--) {
+      const u = i / cSegs;
+      const yt = nacaYt(u, thick) * chord;
+      const yc = nacaYc(u, camber) * chord;
+      const x = (u - 0.25) * chord;
+      row.push({ p: [x, yc - yt, z], uv: [u, v] });
+    }
+    rows.push(row);
+  }
+  const stride = rows[0]!.length;
+  for (let j = 0; j <= sSegs; j++) {
+    for (const q of rows[j]!) pushVert(verts, q.p, [0, 1, 0], q.uv);
+  }
+  for (let j = 0; j < sSegs; j++) {
+    for (let i = 0; i < stride - 1; i++) {
+      const a = j * stride + i;
+      const b = a + stride;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const nVert = verts.length / VERTEX_STRIDE;
+  const acc = new Float32Array(nVert * 3);
+  for (let t = 0; t < idx.length; t += 3) {
+    const i0 = idx[t]!, i1 = idx[t + 1]!, i2 = idx[t + 2]!;
+    const o0 = i0 * VERTEX_STRIDE, o1 = i1 * VERTEX_STRIDE, o2 = i2 * VERTEX_STRIDE;
+    const ax = verts[o1]! - verts[o0]!, ay = verts[o1 + 1]! - verts[o0 + 1]!, az = verts[o1 + 2]! - verts[o0 + 2]!;
+    const bx = verts[o2]! - verts[o0]!, by = verts[o2 + 1]! - verts[o0 + 1]!, bz = verts[o2 + 2]! - verts[o0 + 2]!;
+    const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    for (const ii of [i0, i1, i2]) {
+      acc[ii * 3] = (acc[ii * 3] ?? 0) + nx;
+      acc[ii * 3 + 1] = (acc[ii * 3 + 1] ?? 0) + ny;
+      acc[ii * 3 + 2] = (acc[ii * 3 + 2] ?? 0) + nz;
+    }
+  }
+  for (let i = 0; i < nVert; i++) {
+    const nx = acc[i * 3] ?? 0, ny = acc[i * 3 + 1] ?? 1, nz = acc[i * 3 + 2] ?? 0;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    const o = i * VERTEX_STRIDE;
+    verts[o + 3] = nx / l;
+    verts[o + 4] = ny / l;
+    verts[o + 5] = nz / l;
+  }
+  return pack(verts, idx);
+}
+
+export function createTunnelWires(
+  x0: number,
+  x1: number,
+  y: number,
+  z: number,
+): { vertices: Float32Array; count: number } {
+  const l: number[] = [];
+  const col: [number, number, number] = [0.28, 0.32, 0.3];
+  const add = (a: [number, number, number], b: [number, number, number], c = col) => {
+    pushVert(l, a, c, [0, 0]);
+    pushVert(l, b, c, [1, 0]);
+  };
+  const rect = (x: number) => {
+    add([x, 0, -z], [x, 0, z]);
+    add([x, 0, z], [x, y, z]);
+    add([x, y, z], [x, y, -z]);
+    add([x, y, -z], [x, 0, -z]);
+  };
+  rect(x0);
+  rect(x1);
+  add([x0, 0, -z], [x1, 0, -z]);
+  add([x0, 0, z], [x1, 0, z]);
+  add([x0, y, -z], [x1, y, -z]);
+  add([x0, y, z], [x1, y, z]);
+  return { vertices: new Float32Array(l), count: l.length / VERTEX_STRIDE };
+}
+
