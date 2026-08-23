@@ -44,6 +44,7 @@ export function createFramebuffer(
   h: number,
   colorInternals: number[],
   depth: "texture" | "renderbuffer" | "none" = "renderbuffer",
+  filter: number = WebGL2RenderingContext.LINEAR,
 ): Framebuffer {
   const fbo = gl.createFramebuffer();
   if (!fbo) throw new Error("fbo alloc failed");
@@ -52,7 +53,7 @@ export function createFramebuffer(
   const colors: WebGLTexture[] = [];
   const attachments: number[] = [];
   colorInternals.forEach((internal, i) => {
-    const tex = createColorTarget(gl, w, h, internal);
+    const tex = createColorTarget(gl, w, h, internal, filter);
     const att = gl.COLOR_ATTACHMENT0 + i;
     gl.framebufferTexture2D(gl.FRAMEBUFFER, att, gl.TEXTURE_2D, tex, 0);
     colors.push(tex);

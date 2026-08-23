@@ -8,6 +8,8 @@ import { instancingLab } from "./instancing";
 import { gbufferLab } from "./gbuffer";
 import { softwareLab } from "./software";
 
+import { aeroLab } from "./aero";
+
 export const LABS: LabDefinition[] = [
   helloTriangleLab,
   transformsLab,
@@ -17,6 +19,7 @@ export const LABS: LabDefinition[] = [
   instancingLab,
   gbufferLab,
   softwareLab,
+  aeroLab,
 ];
 
 export function labById(id: string): LabDefinition {

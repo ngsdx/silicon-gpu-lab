@@ -9,6 +9,7 @@ export type LabParam = {
   max: number;
   step: number;
   default: number;
+  choices?: string[];
 };
 
 export type LabStats = {
@@ -45,5 +46,6 @@ export type LabDefinition = {
   note: LabNote;
   supportsShaderEdit?: boolean;
   defaultCamera?: "orbit" | "fly";
+  hideCamera?: boolean;
   create(ctx: GlContext): LabInstance;
 };
