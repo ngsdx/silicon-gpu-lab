@@ -47,5 +47,6 @@ export type LabDefinition = {
   supportsShaderEdit?: boolean;
   defaultCamera?: "orbit" | "fly";
   hideCamera?: boolean;
+  fileUpload?: { accept: string; hint: string };
   create(ctx: GlContext): LabInstance;
 };

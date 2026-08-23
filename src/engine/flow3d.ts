@@ -13,13 +13,15 @@ import {
   destroyFramebuffer,
   type Framebuffer,
 } from "./framebuffer";
+import { createDummySdfTexture } from "./sdf3";
 
-export const BODY3_NAMES = ["Sphere", "Cube", "Wing", "Wedge", "Plate", "Diamond"] as const;
+export const BODY3_NAMES = ["Sphere", "Cube", "Wing", "Wedge", "Plate", "Diamond", "Yours"] as const;
 export const VIZ3_NAMES = ["Streamlines", "Speed", "Swirl", "Pressure"] as const;
 
 export const GLSL_FLOW = `
 uniform float uShape, uAoA, uSize, uWind, uTime, uShed, uSpan;
 uniform vec3 uBody;
+uniform highp sampler3D uSdf;
 
 vec3 toBody(vec3 p){
   vec3 q = p - uBody;
@@ -91,6 +93,13 @@ float sdWedge(vec3 p, float s, float span){
 }
 float localSdf(vec3 q){
   float s = uSize;
+  if (uShape > 5.5) {
+    vec3 uvw = q / max(s, 1e-4) * 0.5 + 0.5;
+    float ax = abs(q.x), ay = abs(q.y), az = abs(q.z);
+    float box = length(max(vec3(ax, ay, az) - vec3(s), 0.0)) + min(max(ax, max(ay, az)) - s, 0.0);
+    if (uvw.x < 0.0 || uvw.y < 0.0 || uvw.z < 0.0 || uvw.x > 1.0 || uvw.y > 1.0 || uvw.z > 1.0) return box;
+    return texture(uSdf, uvw).r * s;
+  }
   if (uShape < 0.5) return sdSphere(q, s);
   if (uShape < 1.5) return sdBox(q, vec3(s));
   if (uShape < 2.5) return sdWing(q, s*1.7, uSpan, 0.12);
@@ -340,6 +349,8 @@ export class ParticleField {
   private pair: Pair;
   private stepProg: ShaderProgram;
   private seedProg: ShaderProgram;
+  private dummySdf: WebGLTexture;
+  customSdf: WebGLTexture | null = null;
   constructor(
     private gl: WebGL2RenderingContext,
     private tri: GpuMesh,
@@ -354,6 +365,7 @@ export class ParticleField {
     this.pair = makePair(gl, pw, ph);
     this.stepProg = createProgram(gl, VS_BLIT, FS_PSTEP);
     this.seedProg = createProgram(gl, VS_BLIT, FS_SEED);
+    this.dummySdf = createDummySdfTexture(gl);
     this.seed();
   }
 
@@ -377,6 +389,9 @@ export class ParticleField {
     gl.uniform1f(p.uniforms.uShed, params.shed);
     gl.uniform1f(p.uniforms.uSpan, params.size * 2.6);
     gl.uniform3f(p.uniforms.uBody, 0, params.bodyY, 0);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_3D, this.customSdf ?? this.dummySdf);
+    if (p.uniforms.uSdf) gl.uniform1i(p.uniforms.uSdf, 2);
   }
 
   step(dt: number, time: number, params: FlowParams) {
@@ -406,5 +421,7 @@ export class ParticleField {
     destroyFramebuffer(gl, this.pair.write);
     destroyProgram(gl, this.stepProg);
     destroyProgram(gl, this.seedProg);
+    gl.deleteTexture(this.dummySdf);
+    if (this.customSdf) gl.deleteTexture(this.customSdf);
   }
 }

@@ -248,6 +248,33 @@ export function createAxisLines(len = 2): { vertices: Float32Array; count: numbe
   return { vertices: new Float32Array(l), count: l.length / VERTEX_STRIDE };
 }
 
+/** Triangle soup (9 floats/tri) → interleaved GPU mesh with face normals. */
+export function createMeshFromTriangles(tris: Float32Array): CpuMesh {
+  const verts: number[] = [];
+  const idx: number[] = [];
+  const n = (tris.length / 9) | 0;
+  for (let i = 0; i < n; i++) {
+    const o = i * 9;
+    const ax = tris[o]!, ay = tris[o + 1]!, az = tris[o + 2]!;
+    const bx = tris[o + 3]!, by = tris[o + 4]!, bz = tris[o + 5]!;
+    const cx = tris[o + 6]!, cy = tris[o + 7]!, cz = tris[o + 8]!;
+    let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+    let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l;
+    ny /= l;
+    nz /= l;
+    const nrm: [number, number, number] = [nx, ny, nz];
+    const base = verts.length / VERTEX_STRIDE;
+    pushVert(verts, [ax, ay, az], nrm, [0, 0]);
+    pushVert(verts, [bx, by, bz], nrm, [1, 0]);
+    pushVert(verts, [cx, cy, cz], nrm, [0.5, 1]);
+    idx.push(base, base + 1, base + 2);
+  }
+  return pack(verts, idx);
+}
+
 export function createOctahedron(s: number): CpuMesh {
   const p: [number, number, number][] = [
     [s, 0, 0],

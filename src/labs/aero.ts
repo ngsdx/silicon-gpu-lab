@@ -1,4 +1,4 @@
-import { createMesh, createRawMesh, drawMesh, type GpuMesh } from "@/engine/buffer";
+import { createMesh, createRawMesh, destroyMesh, drawMesh, type GpuMesh } from "@/engine/buffer";
 import { createProgram } from "@/engine/shader";
 import {
   disposeCommon,
@@ -12,12 +12,16 @@ import {
 import {
   createCube,
   createIcosphere,
+  createMeshFromTriangles,
   createNacaWing,
   createOctahedron,
   createPlane,
   createTunnelWires,
   createWedge,
 } from "@/engine/mesh";
+import { parseMeshFile } from "@/engine/mesh-loader";
+import { bakeSdf, createSdfTexture, SDF_N } from "@/engine/sdf3";
+import { useMeshUpload } from "@/mesh-upload-store";
 import {
   BODY3_NAMES,
   FS_TRACER,
@@ -132,6 +136,7 @@ export const aeroLab: LabDefinition = {
   title: "Wind Tunnel",
   subtitle: "3D potential · horseshoe · tracers",
   defaultCamera: "orbit",
+  fileUpload: { accept: ".obj,.stl,model/obj,model/stl", hint: "Wavefront OBJ or STL" },
   pipeline: [
     "3D body VAO",
     "Analytic flow field",
@@ -145,7 +150,7 @@ export const aeroLab: LabDefinition = {
       key: "body",
       label: "Body",
       min: 0,
-      max: 5,
+      max: 6,
       step: 1,
       default: 2,
       choices: [...BODY3_NAMES],
@@ -176,7 +181,7 @@ export const aeroLab: LabDefinition = {
   ],
   note: {
     title: "A 3D tunnel, a changeable body",
-    body: "Wind is a steady freestream from −X. Tracers are a smoke rake — 14×10 streamlines plus fill — advected with RK2 through an analytic 3D velocity field on the GPU. Sphere uses the exact doublet potential. The wing uses lifting-line theory: a bound vortex along the span and two trailing vortices from the tips (a horseshoe). Circulation Γ = ½ Cl U c with Cl ≈ 2π α, collapsing as the wing stalls. Cube, wedge, plate and diamond block the stream with a no-slip SDF and shed a Kármán street. Swap the body or crank angle of attack and the field updates that frame. Pressure mode paints Cp = 1 − (u/U)² on the metal (Bernoulli). Full 3D Navier–Stokes is a 3D FBO; this is the vortex-method / potential-flow stack wind-tunnel engineers still use to read a flow before they pay for a RANS solve.",
+    body: "Wind is a steady freestream from −X. Drop your own .obj / .stl — it is voxelized to a 40³ signed-distance TEXTURE_3D, then the same no-slip field the primitives use. Built-in bodies: sphere doublet, lifting-line horseshoe, SDF cubes and plates. Tracers are a smoke rake advected with RK2. Pressure mode paints Cp = 1 − (u/U)² on the metal (Bernoulli).",
     glsl: "u = U∞ + u_doublet + u_horseshoe(Γ)\nΓ = ½ Cl U c,   Cl ≈ 2π α\nCp = 1 − |u|²/U²\np ← p + ½ (k₁+k₂) Δt     // RK2",
     mapping: "glTexStorage2D(GL_RGBA16F) → particle state\ngl_PointSize + vertex-texture fetch → 10k tracers\nSame as a desktop core-profile particle CFD viewer.",
   },
@@ -208,6 +213,28 @@ export const aeroLab: LabDefinition = {
     let t = 0;
     let cur = pack({});
     let cam: Camera | null = null;
+    let customMesh: GpuMesh | null = null;
+    let lastUploadRev = -1;
+    let customMeta = { name: "", tris: 0, voxels: 0 };
+
+    const ingestUpload = () => {
+      const up = useMeshUpload.getState().upload;
+      if (!up || up.rev === lastUploadRev) return;
+      lastUploadRev = up.rev;
+      try {
+        const loaded = parseMeshFile(up.name, up.buffer);
+        const cpu = createMeshFromTriangles(loaded.tris);
+        if (customMesh) destroyMesh(gl, customMesh);
+        customMesh = uploadMesh(gl, cpu);
+        const sdf = bakeSdf(loaded.tris, SDF_N);
+        if (field.customSdf) gl.deleteTexture(field.customSdf);
+        field.customSdf = createSdfTexture(gl, sdf, SDF_N);
+        customMeta = { name: loaded.name, tris: loaded.triCount, voxels: SDF_N };
+        useMeshUpload.getState().setError(null);
+      } catch (e) {
+        useMeshUpload.getState().setError(e instanceof Error ? e.message : String(e));
+      }
+    };
 
     const buildModel = (p: FlowParams) => {
       mat4FromTranslation(model, [0, p.bodyY, 0]);
@@ -223,6 +250,7 @@ export const aeroLab: LabDefinition = {
 
     return {
       update(dt, _input, params, camera) {
+        ingestUpload();
         cur = pack(params);
         cam = camera;
         t += dt;
@@ -255,14 +283,16 @@ export const aeroLab: LabDefinition = {
         gl.enable(gl.CULL_FACE);
 
         buildModel(cur);
-        const mesh = bodies[cur.shape] ?? sphere;
+        const mesh = cur.shape >= 6 ? (customMesh ?? cube) : (bodies[cur.shape] ?? sphere);
         gl.useProgram(bodyProg.prog);
         setCameraUniforms(gl, bodyProg, cam, model);
         gl.uniformMatrix4fv(bodyProg.uniforms.uNormal, false, mat4Normal(normal, model));
         gl.uniform3fv(bodyProg.uniforms.uEye, cam.eye);
         field.bindFlow(bodyProg, cur, t);
         gl.uniform1f(bodyProg.uniforms.uViz, cur.viz);
+        if (cur.shape >= 6) gl.disable(gl.CULL_FACE);
         drawMesh(gl, mesh);
+        if (cur.shape >= 6) gl.enable(gl.CULL_FACE);
 
         let instances = 0;
         if (cur.particles > 0.5) {
@@ -294,10 +324,18 @@ export const aeroLab: LabDefinition = {
             body: BODY3_NAMES[cur.shape] ?? "—",
             α: `${((cur.aoa * 180) / Math.PI).toFixed(1)}°`,
             U: cur.wind.toFixed(2),
+            ...(cur.shape >= 6
+              ? {
+                  file: customMeta.name || "drop .obj / .stl",
+                  meshTris: customMeta.tris || 0,
+                  SDF: customMeta.voxels ? `${customMeta.voxels}³` : "—",
+                }
+              : {}),
           },
         };
       },
       dispose() {
+        if (customMesh) destroyMesh(gl, customMesh);
         field.dispose();
         disposeCommon(
           gl,

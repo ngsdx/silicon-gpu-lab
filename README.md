@@ -16,7 +16,7 @@ WebGL2 is OpenGL ES 3.00. The objects you create here (`VAO`, `VBO`, `FBO`, `sam
 | 05 | Instancing | `drawElementsInstanced`, divisor-1 matrices, 1 draw for N meshes |
 | 06 | G-Buffer | Multiple render targets, deferred geometry buffers |
 | 07 | CPU Rasterizer | Barycentric fill, z-buffer, perspective-correct attributes vs the GPU |
-| 08 | Wind Tunnel | 3D potential + horseshoe vortex, smoke-rake tracers, swap the body |
+| 08 | Wind Tunnel | 3D potential + horseshoe, smoke-rake tracers, **upload your .obj / .stl** |
 
 ## Hardware
 
